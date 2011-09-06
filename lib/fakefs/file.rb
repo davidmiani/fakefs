@@ -432,12 +432,12 @@ module FakeFS
       (@mode & mask) != 0 if @mode.is_a?(Integer)
     end
 
-    # Create a missing file if the path is valid.
+    # Create a missing file if the path's valid.
     #
     def create_missing_file
       raise Errno::EISDIR, "Is a directory - #{path}" if File.directory?(@path)
 
-      if !File.exists?(@path) # Unnecessary check, probably.
+      if !File.exists?(@path)   # Unnecessary check, probably.
         dirname = RealFile.dirname @path
 
         unless dirname == "."

@@ -45,15 +45,7 @@ class FakeFSTest < Test::Unit::TestCase
     end
   end
 
-  def test_can_create_directories_with_mkpath
-    FileUtils.mkpath("/path/to/dir")
-    assert_kind_of FakeDir, FileSystem.fs['path']['to']['dir']
-  end
 
-  def test_can_create_directories_with_mkpath_and_options
-    FileUtils.mkpath("/path/to/dir", :mode => 0755)
-    assert_kind_of FakeDir, FileSystem.fs['path']['to']['dir']
-  end
 
   def test_can_create_directories_with_mkpath
     FileUtils.makedirs("/path/to/dir")
@@ -698,6 +690,9 @@ class FakeFSTest < Test::Unit::TestCase
     assert_equal ['/path/bar', '/path/bar/baz', '/path/bar2', '/path/bar2/baz', '/path/foo', '/path/foobar'], Dir['/path/**/*']
     assert_equal ['/path/bar/baz'], Dir['/path/bar/**/*']
 
+    assert_equal ['/path/bar/baz', '/path/bar2/baz'], Dir['/path/bar/**/*', '/path/bar2/**/*']
+    assert_equal ['/path/bar/baz', '/path/bar2/baz', '/path/bar/baz'], Dir['/path/ba*/**/*', '/path/bar/**/*']
+
     FileUtils.cp_r '/path', '/otherpath'
 
     assert_equal %w( /otherpath/foo /otherpath/foobar /path/foo /path/foobar ), Dir['/*/foo*']
@@ -729,6 +724,18 @@ class FakeFSTest < Test::Unit::TestCase
     File.open('/one/five.rb', 'w')
     assert_equal ['/one/five.rb', '/one/two', '/one/two/three', '/one/two/three/four.rb'], Dir['/one/**/*']
     assert_equal ['/one/five.rb', '/one/two'], Dir['/one/**']
+  end
+
+  def test_dir_glob_does_not_match_dot_dirs_by_default
+    FileUtils.mkdir_p('/one/.dotdir/')
+    File.open('/one/.dotdir/three.rb', 'w')
+    assert_equal [], Dir['/one/**/*']
+  end
+
+  def test_dir_glob_can_be_overridden_to_match_dot_dirs
+    FileUtils.mkdir_p('/one/.dotdir/')
+    File.open('/one/.dotdir/three.rb', 'w')
+    assert_equal ['/one/.dotdir/three.rb'], Dir.glob(['/one/**/*'], File::FNM_DOTMATCH)
   end
 
   def test_dir_glob_with_block
@@ -1415,6 +1422,11 @@ class FakeFSTest < Test::Unit::TestCase
   def test_directory_mkdir
     Dir.mkdir('/path')
     assert File.exists?('/path')
+  end
+
+  def test_can_create_directories_starting_with_dot
+    Dir.mkdir './path'
+    assert File.exists? './path'
   end
 
   def test_directory_mkdir_relative
