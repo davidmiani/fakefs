@@ -3,7 +3,7 @@ module FakeFS
     extend self
 
     def fs
-      @fs ||= FakeDir.new('.')
+      @fs ||= FakeDir.new('/')
     end
 
     def clear
@@ -68,6 +68,7 @@ module FakeFS
     def delete(path)
       if node = FileSystem.find(path)
         node.delete
+        true
       end
     end
 
@@ -121,7 +122,8 @@ module FakeFS
           directories_under(dir)
         end
       else
-        dir.reject {|k,v| /\A#{pattern.gsub('?','.').gsub('*', '.*')}\Z/ !~ k }.values
+        regexp_pattern = /\A#{pattern.gsub('?','.').gsub('*', '.*').gsub(/\{(.*?)\}/) { "(#{$1.gsub(',', '|')})" }}\Z/
+        dir.reject {|k,v| regexp_pattern !~ k }.values
       end
 
       if parts.empty? # we're done recursing

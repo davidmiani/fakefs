@@ -65,6 +65,12 @@ class FakeFSTest < Test::Unit::TestCase
     assert_kind_of FakeDir, FileSystem.fs['path']['to']['dir']
   end
 
+  def test_unlink_errors_on_file_not_found
+    assert_raise Errno::ENOENT do
+      FileUtils.rm("/foo")
+    end
+  end
+
   def test_can_delete_directories
     FileUtils.mkdir_p("/path/to/dir")
     FileUtils.rmdir("/path/to/dir")
@@ -111,6 +117,11 @@ class FakeFSTest < Test::Unit::TestCase
     assert File.exists?(path)
   end
 
+  def test_symlink_with_missing_refferent_does_not_exist
+    File.symlink('/foo', '/bar')
+    assert !File.exists?('/bar')
+  end
+
   def test_can_create_symlinks
     FileUtils.mkdir_p(target = "/path/to/target")
     FileUtils.ln_s(target, "/path/to/link")
@@ -141,14 +152,63 @@ class FakeFSTest < Test::Unit::TestCase
     assert_equal target, File.readlink(link)
   end
 
+  def test_symlinks_in_different_directories
+    FileUtils.mkdir_p("/path/to/bar")
+    FileUtils.mkdir_p(target = "/path/to/foo/target")
+
+    FileUtils.ln_s(target, link = "/path/to/bar/symlink")
+    assert_equal target, File.readlink(link)
+  end
+
+  def test_symlink_with_relative_path_exists
+    FileUtils.touch("/file")
+    FileUtils.mkdir_p("/a/b")
+    FileUtils.ln_s("../../file", link = "/a/b/symlink")
+    assert File.exist?('/a/b/symlink')
+  end
+
+  def test_symlink_with_relative_path_and_nonexistant_file_does_not_exist
+    FileUtils.touch("/file")
+    FileUtils.mkdir_p("/a/b")
+    FileUtils.ln_s("../../file_foo", link = "/a/b/symlink")
+    assert !File.exist?('/a/b/symlink')
+  end
+
+  def test_symlink_with_relative_path_has_correct_target
+    FileUtils.touch("/file")
+    FileUtils.mkdir_p("/a/b")
+    FileUtils.ln_s("../../file", link = "/a/b/symlink")
+    assert_equal "../../file", File.readlink(link)
+  end
+
+  def test_symlinks_to_symlinks
+    FileUtils.mkdir_p(target = "/path/to/foo/target")
+    FileUtils.mkdir_p("/path/to/bar")
+    FileUtils.mkdir_p("/path/to/bar2")
+
+    FileUtils.ln_s(target, link1 = "/path/to/bar/symlink")
+    FileUtils.ln_s(link1, link2 = "/path/to/bar2/symlink")
+    assert_equal link1, File.readlink(link2)
+  end
+
+  def test_symlink_to_symlinks_should_raise_error_if_dir_doesnt_exist
+    FileUtils.mkdir_p(target = "/path/to/foo/target")
+
+    assert !Dir.exists?("/path/to/bar")
+
+    assert_raise Errno::ENOENT do
+      FileUtils.ln_s(target, "/path/to/bar/symlink")
+    end
+  end
+
   def test_knows_symlinks_are_symlinks
     FileUtils.mkdir_p(target = "/path/to/target")
     FileUtils.ln_s(target, link = "/path/to/symlink")
     assert File.symlink?(link)
   end
 
-  def test_can_create_files
-    path = '/path/to/file.txt'
+  def test_can_create_files_in_current_dir
+    path = 'file.txt'
     File.open(path, 'w') do |f|
       f.write "Yatta!"
     end
@@ -158,7 +218,74 @@ class FakeFSTest < Test::Unit::TestCase
     assert File.writable?(path)
   end
 
+  def test_can_create_files_in_existing_dir
+    FileUtils.mkdir_p "/path/to"
+    path = "/path/to/file.txt"
+
+    File.open(path, 'w') do |f|
+      f.write "Yatta!"
+    end
+
+    assert File.exists?(path)
+    assert File.readable?(path)
+    assert File.writable?(path)
+  end
+
+  def test_raises_ENOENT_trying_to_create_files_in_nonexistent_dir
+    path = "/path/to/file.txt"
+
+    assert_raises(Errno::ENOENT) {
+      File.open(path, 'w') do |f|
+        f.write "Yatta!"
+      end
+    }
+  end
+
+  def test_raises_ENOENT_trying_to_create_files_in_relative_nonexistent_dir
+    FileUtils.mkdir_p "/some/path"
+
+    Dir.chdir("/some/path") {
+      assert_raises(Errno::ENOENT) {
+        File.open("../foo") {|f| f.write "moo" }
+      }
+    }
+  end
+
+  def test_raises_ENOENT_trying_to_create_files_in_obscured_nonexistent_dir
+    FileUtils.mkdir_p "/some/path"
+
+    assert_raises(Errno::ENOENT) {
+      File.open("/some/path/../foo") {|f| f.write "moo" }
+    }
+  end
+
+  def test_raises_ENOENT_trying_to_create_tilde_referenced_nonexistent_dir
+    path = "~/fakefs_test_#{$$}_0000"
+
+    while File.exist? path
+      path = path.succ
+    end
+
+    assert_raises(Errno::ENOENT) {
+      File.open("#{path}/foo") {|f| f.write "moo" }
+    }
+  end
+
+  def test_raises_EISDIR_if_trying_to_open_existing_directory_name
+    path = "/path/to"
+
+    FileUtils.mkdir_p path
+
+    assert_raises(Errno::EISDIR) {
+      File.open(path, 'w') do |f|
+        f.write "Yatta!"
+      end
+    }
+  end
+
   def test_can_create_files_with_bitmasks
+    FileUtils.mkdir_p("/path/to")
+
     path = '/path/to/file.txt'
     File.open(path, File::RDWR | File::CREAT) do |f|
       f.write "Yatta!"
@@ -277,7 +404,7 @@ class FakeFSTest < Test::Unit::TestCase
   end
 
   def test_can_read_files_once_written
-    path = '/path/to/file.txt'
+    path = 'file.txt'
     File.open(path, 'w') do |f|
       f.write "Yatta!"
     end
@@ -286,7 +413,7 @@ class FakeFSTest < Test::Unit::TestCase
   end
 
   def test_can_write_to_files
-    path = '/path/to/file.txt'
+    path = 'file.txt'
     File.open(path, 'w') do |f|
       f << 'Yada Yada'
     end
@@ -300,11 +427,12 @@ class FakeFSTest < Test::Unit::TestCase
   end
 
   def test_can_open_file_in_binary_mode
-    File.open("/foo", "wb") { |x| x << "a" }
-    assert_equal "a", File.read("/foo")
+    File.open("foo", "wb") { |x| x << "a" }
+    assert_equal "a", File.read("foo")
   end
 
   def test_can_chunk_io_when_reading
+    FileUtils.mkdir_p "/path/to"
     path = '/path/to/file.txt'
     File.open(path, 'w') do |f|
       f << 'Yada Yada'
@@ -318,7 +446,7 @@ class FakeFSTest < Test::Unit::TestCase
   end
 
   def test_can_get_size_of_files
-    path = '/path/to/file.txt'
+    path = 'file.txt'
     File.open(path, 'w') do |f|
       f << 'Yada Yada'
     end
@@ -326,20 +454,20 @@ class FakeFSTest < Test::Unit::TestCase
   end
 
   def test_can_check_if_file_has_size?
-    path = '/path/to/file.txt'
+    path = 'file.txt'
     File.open(path, 'w') do |f|
       f << 'Yada Yada'
     end
     assert File.size?(path)
-    assert_nil File.size?("/path/to/other.txt")
+    assert_nil File.size?("other.txt")
   end
 
   def test_can_check_size_of_empty_file
-    path = '/path/to/file.txt'
+    path = 'file.txt'
     File.open(path, 'w') do |f|
       f << ''
     end
-    assert_nil File.size?("/path/to/file.txt")
+    assert_nil File.size?("file.txt")
   end
 
   def test_raises_error_on_mtime_if_file_does_not_exist
@@ -349,16 +477,16 @@ class FakeFSTest < Test::Unit::TestCase
   end
 
   def test_can_return_mtime_on_existing_file
-    path = '/path/to/file.txt'
+    path = 'file.txt'
     File.open(path, 'w') do |f|
       f << ''
     end
-    assert File.mtime('/path/to/file.txt').is_a?(Time)
+    assert File.mtime('file.txt').is_a?(Time)
   end
 
   def test_raises_error_on_ctime_if_file_does_not_exist
     assert_raise Errno::ENOENT do
-      File.ctime('/path/to/file.txt')
+      File.ctime('file.txt')
     end
   end
 
@@ -418,16 +546,16 @@ class FakeFSTest < Test::Unit::TestCase
 
   def test_can_call_utime_on_an_existing_file
     time = Time.now - 300 # Not now
-    path = '/path/to/file.txt'
+    path = 'file.txt'
     File.open(path, 'w') do |f|
       f << ''
     end
     File.utime(time, time, path)
-    assert_equal time, File.mtime('/path/to/file.txt')
+    assert_equal time, File.mtime('file.txt')
   end
 
   def test_utime_returns_number_of_paths
-    path1, path2 = '/path/to/file.txt', '/path/to/another_file.txt'
+    path1, path2 = 'file.txt', 'another_file.txt'
     [path1, path2].each do |path|
       File.open(path, 'w') do |f|
         f << ''
@@ -437,7 +565,7 @@ class FakeFSTest < Test::Unit::TestCase
   end
 
   def test_can_read_with_File_readlines
-    path = '/path/to/file.txt'
+    path = 'file.txt'
     File.open(path, 'w') do |f|
       f.puts "Yatta!", "Gatta!"
       f.puts ["woot","toot"]
@@ -447,7 +575,7 @@ class FakeFSTest < Test::Unit::TestCase
   end
 
   def test_File_close_disallows_further_access
-    path = '/path/to/file.txt'
+    path = 'file.txt'
     file = File.open(path, 'w')
     file.write 'Yada'
     file.close
@@ -457,7 +585,7 @@ class FakeFSTest < Test::Unit::TestCase
   end
 
   def test_File_close_disallows_further_writes
-    path = '/path/to/file.txt'
+    path = 'file.txt'
     file = File.open(path, 'w')
     file.write 'Yada'
     file.close
@@ -467,7 +595,7 @@ class FakeFSTest < Test::Unit::TestCase
   end
 
   def test_can_read_from_file_objects
-    path = '/path/to/file.txt'
+    path = 'file.txt'
     File.open(path, 'w') do |f|
       f.write "Yatta!"
     end
@@ -482,7 +610,7 @@ class FakeFSTest < Test::Unit::TestCase
   end
 
   def test_knows_files_are_files
-    path = '/path/to/file.txt'
+    path = 'file.txt'
     File.open(path, 'w') do |f|
       f.write "Yatta!"
     end
@@ -491,17 +619,17 @@ class FakeFSTest < Test::Unit::TestCase
   end
 
   def test_File_io_returns_self
-    f = File.open("/foo", "w")
+    f = File.open("foo", "w")
     assert_equal f, f.to_io
   end
 
   def test_File_to_i_is_alias_for_filno
-    f = File.open("/foo", "w")
+    f = File.open("foo", "w")
     assert_equal f.method(:to_i), f.method(:fileno)
   end
 
   def test_knows_symlink_files_are_files
-    path = '/path/to/file.txt'
+    path = 'file.txt'
     File.open(path, 'w') do |f|
       f.write "Yatta!"
     end
@@ -573,16 +701,21 @@ class FakeFSTest < Test::Unit::TestCase
     FileUtils.cp_r '/path', '/otherpath'
 
     assert_equal %w( /otherpath/foo /otherpath/foobar /path/foo /path/foobar ), Dir['/*/foo*']
+
+    assert_equal ['/path/bar', '/path/foo'], Dir['/path/{foo,bar}']
+
+    assert_equal ['/path/bar', '/path/bar2'], Dir['/path/bar{2,}']
   end
 
   def test_dir_glob_handles_root
     FileUtils.mkdir_p '/path'
 
     # this fails. the root dir should be named '/' but it is '.'
-    #assert_equal ['/'], Dir['/']
+    assert_equal ['/'], Dir['/']
   end
 
   def test_dir_glob_handles_recursive_globs
+    FileUtils.mkdir_p "/one/two/three"
     File.open('/one/two/three/four.rb', 'w')
     File.open('/one/five.rb', 'w')
     assert_equal ['/one/five.rb', '/one/two/three/four.rb'], Dir['/one/**/*.rb']
@@ -591,6 +724,7 @@ class FakeFSTest < Test::Unit::TestCase
   end
 
   def test_dir_recursive_glob_ending_in_wildcards_returns_both_files_and_dirs
+    FileUtils.mkdir_p "/one/two/three"
     File.open('/one/two/three/four.rb', 'w')
     File.open('/one/five.rb', 'w')
     assert_equal ['/one/five.rb', '/one/two', '/one/two/three', '/one/two/three/four.rb'], Dir['/one/**/*']
@@ -608,7 +742,7 @@ class FakeFSTest < Test::Unit::TestCase
   end
 
   def test_should_report_pos_as_0_when_opening
-    File.open("/foo", "w") do |f|
+    File.open("foo", "w") do |f|
       f << "foobar"
       f.rewind
 
@@ -617,7 +751,7 @@ class FakeFSTest < Test::Unit::TestCase
   end
 
   def test_should_report_pos_as_1_when_seeking_one_char
-    File.open("/foo", "w") do |f|
+    File.open("foo", "w") do |f|
       f << "foobar"
 
       f.rewind
@@ -628,22 +762,22 @@ class FakeFSTest < Test::Unit::TestCase
   end
 
   def test_should_set_pos
-    File.open("/foo", "w") do |f|
+    File.open("foo", "w") do |f|
       f << "foo"
     end
 
-    fp = File.open("/foo", "r")
+    fp = File.open("foo", "r")
     fp.pos = 1
 
     assert_equal 1, fp.pos
   end
 
   def test_should_set_pos_with_tell_method
-    File.open("/foo", "w") do |f|
+    File.open("foo", "w") do |f|
       f << "foo"
     end
 
-    fp = File.open("/foo", "r")
+    fp = File.open("foo", "r")
     fp.tell = 1
 
     assert_equal 1, fp.pos
@@ -677,15 +811,14 @@ class FakeFSTest < Test::Unit::TestCase
   def test_chdir_changes_directories_like_a_boss
     # I know memes!
     FileUtils.mkdir_p '/path'
-    assert_equal '.', FileSystem.fs.name
+    assert_equal '/', FileSystem.fs.name
     assert_equal({}, FileSystem.fs['path'])
     Dir.chdir '/path' do
       File.open('foo', 'w') { |f| f.write 'foo'}
       File.open('foobar', 'w') { |f| f.write 'foo'}
     end
 
-    assert_equal("/", Dir.pwd)
-    assert_equal '.', FileSystem.fs.name
+    assert_equal '/', FileSystem.fs.name
     assert_equal(['foo', 'foobar'], FileSystem.fs['path'].keys.sort)
 
     c = nil
@@ -1216,8 +1349,14 @@ class FakeFSTest < Test::Unit::TestCase
       FileUtils.touch("/this/path/should/be/here/#{f}")
     end
 
-    assert_raises(SystemCallError) do
+    assert_raises(Errno::ENOTEMPTY) do
       Dir.delete('/this/path/should/be/here')
+    end
+  end
+
+  def test_directory_class_delete_does_not_work_if_dir_path_cannot_be_found
+    assert_raises(Errno::ENOENT) do
+      Dir.delete('/this/path/should/not/be/here')
     end
   end
 
@@ -1247,6 +1386,12 @@ class FakeFSTest < Test::Unit::TestCase
     yielded = Dir.entries('/this/path/should/be/here/')
     assert yielded.size == test.size
     test.each { |t| assert yielded.include?(t) }
+  end
+
+  def test_directory_entries_does_not_work_if_dir_path_cannot_be_found
+    assert_raises(Errno::ENOENT) do
+      Dir.delete('/this/path/should/not/be/here')
+    end
   end
 
   def test_directory_foreach
@@ -1473,14 +1618,6 @@ class FakeFSTest < Test::Unit::TestCase
     end
   end
 
-  def test_delete_does_not_raise_error_when_second_file_does_not_exist
-    FileUtils.touch("/foo")
-
-    assert_nothing_raised do
-      File.delete("/foo", "/bar")
-    end
-  end
-
   def test_unlink_is_alias_for_delete
     assert_equal File.method(:unlink), File.method(:delete)
   end
@@ -1589,6 +1726,20 @@ class FakeFSTest < Test::Unit::TestCase
     assert !FileTest.directory?('/path/to/somedir')
   end
 
+  def test_filetest_file_returns_correct_values
+    FileUtils.mkdir_p("/path/to")
+
+    path = '/path/to/file.txt'
+    File.open(path, 'w') { |f| f.write "Yatta!" }
+    assert FileTest.file?(path)
+
+    FileUtils.rm path
+    assert !FileTest.file?(path)
+
+    FileUtils.mkdir_p '/path/to/somedir'
+    assert !FileTest.file?('/path/to/somedir')
+  end
+
   def test_pathname_exists_returns_correct_value
     FileUtils.touch "foo"
     assert Pathname.new("foo").exist?
@@ -1654,6 +1805,12 @@ class FakeFSTest < Test::Unit::TestCase
         assert_equal true, f.autoclose?
         f.autoclose = false
         assert_equal false, f.autoclose?
+      end
+    end
+
+    def test_to_path
+      File.new("foo", 'w') do |f|
+        assert_equal "foo", f.to_path
       end
     end
   end

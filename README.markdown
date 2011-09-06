@@ -47,6 +47,13 @@ Don't Fake the FS Immediately
       # your code
     end
 
+Rails
+-----
+
+If you are using fakefs in a rails project with bundler, you'll probably want to specify the following in your Gemfile:
+
+  gem "fakefs", :require => "fakefs/safe"
+
 
 RSpec
 -----
@@ -121,3 +128,10 @@ Meta
 
 [0]: http://help.github.com/forking/
 [1]: http://github.com/defunkt/fakefs/issues
+
+Releasing
+---------
+
+1. Update version in lib/fakefs/version.rb
+2. Commit it
+3. rake publish
